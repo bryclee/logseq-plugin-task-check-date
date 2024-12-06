@@ -70,17 +70,14 @@ const splitTaskMarkers = (taskMarkers: string | undefined) => {
 logseq.useSettingsSchema(SETTINGS_SCHEMA);
 
 /**
- * Removes the logbook entry from the content string, because adding it via `updateBlock` causes it to appear in the editor text.
+ * Removes the logbook entry and properties from the content string, because adding it via `updateBlock` causes it to appear in the editor text.
  * The actual logbook data is still preserved by Logseq, this just ensures it doesn't appear in the editor text.
  */
-function stripLogbookFromContent(content: string) {
-  const start = content.indexOf(':LOGBOOK:');
+function stripLogbookAndBlockProperties(content: string) {
+  const contentLines = content.split('\n');
+  const filteredLines = contentLines.filter(line => !line.match(/^(\S+::|:LOGBOOK:|CLOCK:|:END:)/));
 
-  if (start !== -1) {
-    return content.substring(0, start - 1); // Take 1 character before to also remove the newline chararcter before the logbook starts
-  }
-
-  return content;
+  return filteredLines.join('\n');
 }
 
 
@@ -111,6 +108,8 @@ function main() {
     const hasTimeProperty =
       taskBlock.properties?.[logseq.settings?.completedTimeProperty as string];
 
+    // We use `updateBlock` instead of `upsertBlockProperty` or `removeBlockProperty` due to issues with updating queries
+    // using the latter functions. https://github.com/logseq/logseq/issues/9802
     if (TASK_MARKERS_COMPLETE.has(taskBlock.marker)) {
       const updateProperties = {};
 
@@ -121,39 +120,45 @@ function main() {
         const datePage = getDateForPage(new Date(), preferredDateFormat);
 
         updateProperties[logseq.settings?.completedDateProperty] = datePage;
-        // logseq.Editor.upsertBlockProperty(
-        //   taskBlock.uuid,
-        //   logseq.settings?.completedDateProperty as string,
-        //   datePage
-        // );
       }
 
       if (!hasTimeProperty && logseq.settings?.includeTime) {
         const timeNow = dayjs().format(logseq.settings?.timeFormat as string);
 
         updateProperties[logseq.settings?.completedTimeProperty] = timeNow;
-        // logseq.Editor.upsertBlockProperty(
-        //   taskBlock.uuid,
-        //   logseq.settings?.completedTimeProperty as string,
-        //   timeNow
-        // );
       }
 
-      logseq.Editor.updateBlock(taskBlock.uuid, stripLogbookFromContent(taskBlock.content), { properties: updateProperties });
-    } else {
-      if (hasCompletedProperty) {
-        logseq.Editor.removeBlockProperty(
-          taskBlock.uuid,
-          logseq.settings?.completedDateProperty as string
+      // Only update if there is something to change, to prevent triggering a rewrite for an unchanged block.
+      if (Object.keys(updateProperties).length > 0) {
+        logseq.Editor.updateBlock(
+          taskBlock.uuid, 
+          stripLogbookAndBlockProperties(taskBlock.content), 
+          { 
+            properties: { 
+              ...taskBlock.properties, 
+              ...updateProperties 
+            } 
+          }
         );
+      }
+    } else if (hasCompletedProperty || hasTimeProperty) {
+      let propertiesAfterRemoval = { ...taskBlock.properties };
+
+      if (hasCompletedProperty) {
+        delete propertiesAfterRemoval[logseq.settings?.completedDateProperty as string];
       }
 
       if (hasTimeProperty) {
-        logseq.Editor.removeBlockProperty(
-          taskBlock.uuid,
-          logseq.settings?.completedTimeProperty as string
-        );
+        delete propertiesAfterRemoval[logseq.settings?.completedTimeProperty as string];
       }
+
+      logseq.Editor.updateBlock(
+        taskBlock.uuid,
+        stripLogbookAndBlockProperties(taskBlock.content),
+        {
+          properties: propertiesAfterRemoval
+        }
+      )
     }
   });
 
