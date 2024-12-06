@@ -97,27 +97,34 @@ function main() {
       taskBlock.properties?.[logseq.settings?.completedTimeProperty as string];
 
     if (TASK_MARKERS_COMPLETE.has(taskBlock.marker)) {
+      const updateProperties = {}
+
       if (!hasCompletedProperty && logseq.settings?.includeDate) {
         const userConfigs = await logseq.App.getUserConfigs();
         let preferredDateFormat = userConfigs.preferredDateFormat;
         preferredDateFormat = preferredDateFormat.replace(/E{1,3}/, "EEE"); //handle same E, EE, or EEE bug
         const datePage = getDateForPage(new Date(), preferredDateFormat);
 
-        logseq.Editor.upsertBlockProperty(
-          taskBlock.uuid,
-          logseq.settings?.completedDateProperty as string,
-          datePage
-        );
+        updateProperties[logseq.settings?.completedDateProperty] = datePage;
+        // logseq.Editor.upsertBlockProperty(
+        //   taskBlock.uuid,
+        //   logseq.settings?.completedDateProperty as string,
+        //   datePage
+        // );
       }
 
       if (!hasTimeProperty && logseq.settings?.includeTime) {
         const timeNow = dayjs().format(logseq.settings?.timeFormat as string);
-        logseq.Editor.upsertBlockProperty(
-          taskBlock.uuid,
-          logseq.settings?.completedTimeProperty as string,
-          timeNow
-        );
+
+        updateProperties[logseq.settings?.completedTimeProperty] = timeNow;
+        // logseq.Editor.upsertBlockProperty(
+        //   taskBlock.uuid,
+        //   logseq.settings?.completedTimeProperty as string,
+        //   timeNow
+        // );
       }
+
+      logseq.Editor.updateBlock(taskBlock.uuid, taskBlock.content, { properties: updateProperties });
     } else {
       if (hasCompletedProperty) {
         logseq.Editor.removeBlockProperty(
