@@ -69,6 +69,21 @@ const splitTaskMarkers = (taskMarkers: string | undefined) => {
 
 logseq.useSettingsSchema(SETTINGS_SCHEMA);
 
+/**
+ * Removes the logbook entry from the content string, because adding it via `updateBlock` causes it to appear in the editor text.
+ * The actual logbook data is still preserved by Logseq, this just ensures it doesn't appear in the editor text.
+ */
+function stripLogbookFromContent(content: string) {
+  const start = content.indexOf(':LOGBOOK:');
+
+  if (start !== -1) {
+    return content.substring(0, start - 1); // Take 1 character before to also remove the newline chararcter before the logbook starts
+  }
+
+  return content;
+}
+
+
 function main() {
   let TASK_MARKERS = new Set(
     splitTaskMarkers(logseq.settings?.taskMarkers as string)
@@ -97,7 +112,7 @@ function main() {
       taskBlock.properties?.[logseq.settings?.completedTimeProperty as string];
 
     if (TASK_MARKERS_COMPLETE.has(taskBlock.marker)) {
-      const updateProperties = {}
+      const updateProperties = {};
 
       if (!hasCompletedProperty && logseq.settings?.includeDate) {
         const userConfigs = await logseq.App.getUserConfigs();
@@ -124,7 +139,7 @@ function main() {
         // );
       }
 
-      logseq.Editor.updateBlock(taskBlock.uuid, taskBlock.content, { properties: updateProperties });
+      logseq.Editor.updateBlock(taskBlock.uuid, stripLogbookFromContent(taskBlock.content), { properties: updateProperties });
     } else {
       if (hasCompletedProperty) {
         logseq.Editor.removeBlockProperty(
