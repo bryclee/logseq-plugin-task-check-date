@@ -1,5 +1,5 @@
 import "@logseq/libs";
-import { SettingSchemaDesc } from "@logseq/libs/dist/LSPlugin.user";
+import { BlockEntity, SettingSchemaDesc } from "@logseq/libs/dist/LSPlugin.user";
 import dayjs from "dayjs";
 import { getDateForPage } from "logseq-dateutils";
 
@@ -69,15 +69,35 @@ const splitTaskMarkers = (taskMarkers: string | undefined) => {
 
 logseq.useSettingsSchema(SETTINGS_SCHEMA);
 
+type UpdateProperties = {
+  add?: [key: string, value: unknown][],
+  remove?: string[]
+}
 /**
- * Removes the logbook entry and properties from the content string, because adding it via `updateBlock` causes it to appear in the editor text.
- * The actual logbook data is still preserved by Logseq, this just ensures it doesn't appear in the editor text.
+ * Return updated block content to match what is expected to show up in the edited block content.
+ * Updates the block properties to match the updated properties.
  */
-function stripLogbookAndBlockProperties(content: string) {
-  const contentLines = content.split('\n');
-  const filteredLines = contentLines.filter(line => !line.match(/^(\S+::|:LOGBOOK:|CLOCK:|:END:)/));
+function getUpdatedBlockContent(block: BlockEntity, updateProperties: UpdateProperties): string {
+  const contentLines = block.content.split('\n');
+  const blockProperties = block.properties ?? {};
+  // Filters out logbook entries, as these do not normally show up in the editing content. The logbook data is still preserved.
+  const logbookRegex = /^(:LOGBOOK:|CLOCK:|:END:)/;
 
-  return filteredLines.join('\n');
+  let updatedLines = contentLines.filter(line => !line.match(logbookRegex));
+
+  updateProperties.add?.forEach(([key, value]) => {
+    if (!(key in blockProperties)) {
+      updatedLines.push(`${key}:: ${value}`);
+    }
+  });
+
+  updateProperties.remove?.forEach((key) => {
+    if (key in blockProperties) {
+      updatedLines = updatedLines.filter(line => !line.startsWith(`${key}::`));
+    }
+  });
+
+  return updatedLines.join('\n');
 }
 
 
@@ -110,7 +130,7 @@ function main() {
 
     // We use `updateBlock` instead of `upsertBlockProperty` or `removeBlockProperty` due to issues with updating queries
     // using the latter functions. https://github.com/logseq/logseq/issues/9802
-    if (TASK_MARKERS_COMPLETE.has(taskBlock.marker)) {
+    if (taskBlock.marker && TASK_MARKERS_COMPLETE.has(taskBlock.marker)) {
       const updateProperties = {};
 
       if (!hasCompletedProperty && logseq.settings?.includeDate) {
@@ -132,7 +152,7 @@ function main() {
       if (Object.keys(updateProperties).length > 0) {
         logseq.Editor.updateBlock(
           taskBlock.uuid, 
-          stripLogbookAndBlockProperties(taskBlock.content), 
+          getUpdatedBlockContent(taskBlock, { add: [...Object.entries(updateProperties)]}), 
           { 
             properties: { 
               ...taskBlock.properties, 
@@ -142,23 +162,31 @@ function main() {
         );
       }
     } else if (hasCompletedProperty || hasTimeProperty) {
-      let propertiesAfterRemoval = { ...taskBlock.properties };
+      const propertiesToRemove = []
 
       if (hasCompletedProperty) {
-        delete propertiesAfterRemoval[logseq.settings?.completedDateProperty as string];
+        propertiesToRemove.push(logseq.settings?.completedDateProperty as string);
       }
 
       if (hasTimeProperty) {
-        delete propertiesAfterRemoval[logseq.settings?.completedTimeProperty as string];
+        propertiesToRemove.push(logseq.settings?.completedTimeProperty as string);
       }
 
-      logseq.Editor.updateBlock(
-        taskBlock.uuid,
-        stripLogbookAndBlockProperties(taskBlock.content),
-        {
-          properties: propertiesAfterRemoval
+      if (propertiesToRemove.length) {
+        const propertiesAfterRemoval = { ...taskBlock.properties };
+
+        for (const prop of propertiesToRemove) {
+          delete propertiesAfterRemoval[prop];
         }
-      )
+
+        logseq.Editor.updateBlock(
+          taskBlock.uuid,
+          getUpdatedBlockContent(taskBlock, { remove: propertiesToRemove }),
+          {
+            properties: propertiesAfterRemoval
+          }
+        )
+      }
     }
   });
 
